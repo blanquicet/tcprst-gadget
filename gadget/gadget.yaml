@@ -1,0 +1,105 @@
+name: tcprst
+description: Trace the sequence of kernel function calls involved in the transmission
+  of IPv4 TCP RST packets.
+tracers:
+  events:
+    mapName: events
+    structName: event
+structs:
+  event:
+    fields:
+    - name: callee
+      description: Kernel function that sends IPv4 TCP RST packets. It could be FUNC_TCP_SEND_ACTIVE_RESET
+        or FUNC_TCP_V4_SEND_RESET.
+      attributes:
+        width: 26
+        alignment: left
+        ellipsis: start
+    - name: caller
+      description: Kernel function that calls the actual function that generates the
+        RST (callee). It could be FUNC_TCP_DISCONNECT, FUNC_TCP_ABORT, FUNC_TCP_CLOSE,
+        FUNC_TCP_KEEPALIVE_TIMER or FUNC_TCP_OUT_OF_RESOURCES for FUNC_TCP_SEND_ACTIVE_RESET.Or,
+        FUNC_TCP_V4_DO_RCV or FUNC_TCP_V4_RCV for FUNC_TCP_V4_SEND_RESET.
+      attributes:
+        width: 26
+        alignment: left
+        ellipsis: start
+    - name: sk_state
+      description: State of the socket before calling the actual function that generates
+        the RST (callee). Inside the callee, it might be already TCP_CLOSE.
+      attributes:
+        width: 3
+        alignment: left
+        ellipsis: end
+    - name: mntns_id
+      description: Mount namespace inode id of the process that calls callee.
+      attributes:
+        template: ns
+    - name: netns_id
+      description: Network namespace inode id of the process that calls callee.
+      attributes:
+        template: ns
+    - name: pid
+      description: Process ID of the process that calls callee.
+      attributes:
+        template: pid
+    - name: tid
+      description: Thread ID of the process that calls callee.
+      attributes:
+        hidden: true
+        template: pid
+    - name: uid
+      description: User ID of the process that calls callee.
+      attributes:
+        hidden: true
+        template: uid
+    - name: gid
+      description: Group ID of the process that calls callee.
+      attributes:
+        hidden: true
+        template: uid
+    - name: comm
+      description: Command name of the process that calls callee.
+      attributes:
+        template: comm
+    - name: socket_mntns_id
+      description: Mount namespace inode id of the process that owns the socket.
+      attributes:
+        template: ns
+    - name: socket_netns_id
+      description: Network namespace inode id of the process that owns the socket.
+      attributes:
+        template: ns
+    - name: socket_pid
+      description: Process ID of the process that owns the socket.
+      attributes:
+        hidden: true
+        template: pid
+    - name: socket_tid
+      description: Thread ID of the process that owns the socket.
+      attributes:
+        hidden: true
+        template: pid
+    - name: socket_uid
+      description: User ID of the process that owns the socket.
+      attributes:
+        hidden: true
+        template: uid
+    - name: socket_gid
+      description: Group ID of the process that owns the socket.
+      attributes:
+        hidden: true
+        template: uid
+    - name: socket_comm
+      description: Command name of the process that owns the socket.
+      attributes:
+        hidden: true
+        template: comm
+    - name: src
+      description: Source address
+      attributes:
+        width: 24
+    - name: dst
+      description: Destination address
+      attributes:
+        width: 24
