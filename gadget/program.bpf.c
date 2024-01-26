@@ -202,8 +202,6 @@ static __always_inline void get_socket_proc(struct proc_ctx *proc,
         return;
     }
 
-    __builtin_memset(proc, 0, sizeof(*proc));
-
     proc->pid = skb_val->pid_tgid >> 32;
     proc->tid = skb_val->pid_tgid;
 
@@ -216,6 +214,8 @@ static __always_inline void get_socket_proc(struct proc_ctx *proc,
     proc->netns_id = netns_id;
 }
 
+// This function could be useful for other gadgets. Consider moving it to some
+// gadget helper library.
 static __always_inline __u32 gadget_get_netns_id()
 {
     struct task_struct *task;
@@ -227,8 +227,6 @@ static __always_inline __u32 gadget_get_netns_id()
 static __always_inline void get_current_proc(struct proc_ctx *proc)
 {
     __u64 pid_tgid, uid_gid;
-
-    __builtin_memset(proc, 0, sizeof(*proc));
 
     pid_tgid = bpf_get_current_pid_tgid();
     proc->pid = pid_tgid >> 32;
@@ -254,6 +252,8 @@ static __always_inline __u32 notify_event(void *ctx,
     if (gadget_should_discard_mntns_id(gadget_get_mntns_id()))
         return 0;
 
+    // Even if we don't have track of the previous function, we still want to
+    // notify the user about the function that led to send the reset.
     __u32 current_pid = get_current_pid();
     pre_rst_event = bpf_map_lookup_or_try_init(&pre_rst, &current_pid,
                                                &empty_event,

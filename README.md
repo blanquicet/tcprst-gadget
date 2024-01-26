@@ -28,7 +28,7 @@ IG_EXPERIMENTAL=true sudo -E ig run ghcr.io/blanquicet/tcprst-gadget
 IG_EXPERIMENTAL=true sudo -E ig run ghcr.io/blanquicet/tcprst-gadget-without-nf
 ```
 
-**WARNING**: The container and process information might not be correct if the
+_**WARNING**: The container and process information might not be correct if the
 server and client are running in the same host (sharing the same kernel). Notice
 it is the information of the process calling the function that sends the RST
 which might be wrong. For instance, it happens when we try to connect to a
@@ -37,8 +37,7 @@ the connection with a RST as it is a closed port. However, when the gadget
 captures the function call generating the reset and we try to retrieve the
 process context using the `bpf_get_current_*()` helpers, they will incorrectly
 return the `wget`'s process information while it should be the kernel one (pid
-`0`, command `swapper/X` and none container name). Maybe because the context
-switch to the kernel never occurs in such a case?
+`0`, command `swapper/X` and none container name)._
 
 ## Testing
 
@@ -134,10 +133,10 @@ represents.
 
 ## Implementation details
 
-**WARNING**: The `ig` version used to build this gadget must include the PR
+_**WARNING**: The `ig` version used to build this gadget must include the PR
 [#2331](https://github.com/inspektor-gadget/inspektor-gadget/pull/2331). It is
 because this gadget uses `gadget_output_buf()` which is not available in the
-latest release: `v0.24.0`.
+latest release: `v0.24.0`._
 
 According to our research, there are three ways in the kernel to send a RST:
 

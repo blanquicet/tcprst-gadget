@@ -30,8 +30,18 @@ build:
 			-t $(CONTAINER_REPO):$(IMAGE_TAG) \
 			--update-metadata .
 
-.PHONY: run-all
-run-all: run-without-nf run
+.PHONY: push-all
+push-all: push-without-nf push
+
+.PHONY: push-without-nf
+push-without-nf:
+	IG_EXPERIMENTAL=true sudo -E \
+		ig image push $(CONTAINER_REPO_WITHOUT_NF):$(IMAGE_TAG)
+
+.PHONY: push
+push:
+	IG_EXPERIMENTAL=true sudo -E \
+		ig image push $(CONTAINER_REPO):$(IMAGE_TAG)
 
 # PARAMS can be used to pass additional parameters locally e.g
 # PARAMS="-o jsonpretty" make run
@@ -46,16 +56,3 @@ run-without-nf:
 run:
 	IG_EXPERIMENTAL=true sudo -E \
 		ig run $(CONTAINER_REPO):$(IMAGE_TAG) $$PARAMS
-
-.PHONY: push-all
-push-all: push-without-nf push
-
-.PHONY: push-without-nf
-push-without-nf:
-	IG_EXPERIMENTAL=true sudo -E \
-		ig image push $(CONTAINER_REPO_WITHOUT_NF):$(IMAGE_TAG)
-
-.PHONY: push
-push:
-	IG_EXPERIMENTAL=true sudo -E \
-		ig image push $(CONTAINER_REPO):$(IMAGE_TAG)
