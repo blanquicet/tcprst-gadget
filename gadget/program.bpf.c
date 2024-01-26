@@ -92,6 +92,11 @@ static const struct event empty_event = {};
 GADGET_TRACER_MAP(events, 1024 * 256);
 GADGET_TRACER(tcprst, events, event);
 
+struct pre_rst_event {
+    enum caller caller;
+    __u8 sk_state;
+};
+
 // pre_rst keeps track of process passing through all the functions that can
 // lead to a tcp_send_active_reset or tcp_v4_send_reset call:
 // tcp_send_active_reset:
@@ -105,10 +110,9 @@ GADGET_TRACER(tcprst, events, event);
 // - tcp_v4_rcv
 // Then, if a tcp_send_active_reset/tcp_v4_send_reset is called, we can check if
 // the process is in the map, and if it is, we notify the user about the
-// function that led to the tcp_send_active_reset/tcp_v4_send_reset call. In the
-// value, we also store the state of the socket because in
-// tcp_send_active_reset/tcp_v4_send_reset, most of the times, the status is
-// already TCP_CLOSE.
+// function that led to the call. In the value, we also store the state of the
+// socket because in tcp_send_active_reset/tcp_v4_send_reset, most of the times,
+// the status is already TCP_CLOSE.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
@@ -116,7 +120,7 @@ struct {
     // point of view. There might be conflicts for the kernel threads as
     // they are all identified by 0.
     __type(key, __u32);
-    __type(value, struct event);
+    __type(value, struct pre_rst_event);
 } pre_rst SEC(".maps");
 
 static __always_inline char *caller2str(enum caller caller)
@@ -246,7 +250,8 @@ static __always_inline __u32 notify_event(void *ctx,
                                         const struct sock *sk,
                                         enum callee callee)
 {
-    struct event *pre_rst_event;
+    struct pre_rst_event *pre_rst_event;
+    struct event *event;
 
     // Filter by container
     if (gadget_should_discard_mntns_id(gadget_get_mntns_id()))
@@ -265,63 +270,70 @@ static __always_inline __u32 notify_event(void *ctx,
         return 0;
     }
 
+	event = gadget_reserve_buf(&events, sizeof(*event));
+	if (!event)
+		return 0;
+
+    // Set info captured in caller function
+    event->caller = pre_rst_event->caller;
+    event->sk_state = pre_rst_event->sk_state;
+
     // Set callee
-    pre_rst_event->callee = callee;
+    event->callee = callee;
 
     // Get process data from bpf helpers, which is the process calling the
     // function that led to the tcp_send_active_reset/tcp_v4_send_reset call
     // (action owner).
     struct proc_ctx current_proc = {};
     get_current_proc(&current_proc);
-    pre_rst_event->pid = current_proc.pid;
-    pre_rst_event->tid = current_proc.tid;
-    pre_rst_event->uid = current_proc.uid;
-    pre_rst_event->gid = current_proc.gid;
-    pre_rst_event->mntns_id = current_proc.mntns_id;
-    pre_rst_event->netns_id = current_proc.netns_id;
-    __builtin_memcpy(pre_rst_event->comm, current_proc.comm,
-                     sizeof(pre_rst_event->comm));
+    event->pid = current_proc.pid;
+    event->tid = current_proc.tid;
+    event->uid = current_proc.uid;
+    event->gid = current_proc.gid;
+    event->mntns_id = current_proc.mntns_id;
+    event->netns_id = current_proc.netns_id;
+    __builtin_memcpy(event->comm, current_proc.comm, sizeof(event->comm));
 
     // Get process data from both socket enricher (socket owner).
     if (sk) {
         struct proc_ctx socket_proc = {};
         get_socket_proc(&socket_proc, sk);
-        pre_rst_event->socket_pid = socket_proc.pid;
-        pre_rst_event->socket_tid = socket_proc.tid;
-        pre_rst_event->socket_uid = socket_proc.uid;
-        pre_rst_event->socket_gid = socket_proc.gid;
-        pre_rst_event->socket_mntns_id = socket_proc.mntns_id;
-        pre_rst_event->socket_netns_id = socket_proc.netns_id;
-        __builtin_memcpy(pre_rst_event->socket_comm, socket_proc.comm,
-                        sizeof(pre_rst_event->socket_comm));
+        event->socket_pid = socket_proc.pid;
+        event->socket_tid = socket_proc.tid;
+        event->socket_uid = socket_proc.uid;
+        event->socket_gid = socket_proc.gid;
+        event->socket_mntns_id = socket_proc.mntns_id;
+        event->socket_netns_id = socket_proc.netns_id;
+        __builtin_memcpy(event->socket_comm, socket_proc.comm,
+                        sizeof(event->socket_comm));
     }
 
     // Get IP data from the socket
-    pre_rst_event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
+    event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
     // Host expects data in host byte order
-    pre_rst_event->dst.port =
+    event->dst.port =
         bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
-    pre_rst_event->src.proto = pre_rst_event->dst.proto = IPPROTO_TCP;
+    event->src.proto = event->dst.proto = IPPROTO_TCP;
     unsigned int family = BPF_CORE_READ(sk, __sk_common.skc_family);
     if (family == AF_INET) {
-        pre_rst_event->src.l3.version = pre_rst_event->dst.l3.version = 4;
-        pre_rst_event->src.l3.addr.v4 =
+        event->src.l3.version = event->dst.l3.version = 4;
+        event->src.l3.addr.v4 =
             BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
-        pre_rst_event->dst.l3.addr.v4 =
+        event->dst.l3.addr.v4 =
             BPF_CORE_READ(sk, __sk_common.skc_daddr);
     } else {
-        pre_rst_event->src.l3.version = pre_rst_event->dst.l3.version = 6;
-        BPF_CORE_READ_INTO(&pre_rst_event->src.l3.addr.v6, sk,
+        event->src.l3.version = event->dst.l3.version = 6;
+        BPF_CORE_READ_INTO(&event->src.l3.addr.v6, sk,
                            __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-        BPF_CORE_READ_INTO(&pre_rst_event->dst.l3.addr.v6, sk,
+        BPF_CORE_READ_INTO(&event->dst.l3.addr.v6, sk,
                            __sk_common.skc_v6_daddr.in6_u.u6_addr32);
     }
 
     bpf_printk("DEBUG: %s->%s: reporting event for tid %u",
-               caller2str(pre_rst_event->caller),
-               callee2str(pre_rst_event->callee), current_pid);
+               caller2str(event->caller),
+               callee2str(event->callee), current_pid);
 
-    gadget_output_buf(ctx, &events, pre_rst_event, sizeof(*pre_rst_event));
+    gadget_submit_buf(ctx, &events, event, sizeof(*event));
 
     return 0;
 }
@@ -356,7 +368,7 @@ int BPF_KPROBE(ig_nf_send_rst, struct sk_buff *oldskb, int hook)
 static __always_inline int trace_pre_tcp_rst(void *ctx, const struct sock *sk,
                                              enum caller caller)
 {
-    struct event *pre_rst_event;
+    struct pre_rst_event *pre_rst_event;
 
     // Filter by container
     if (gadget_should_discard_mntns_id(gadget_get_mntns_id()))
