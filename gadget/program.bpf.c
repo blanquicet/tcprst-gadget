@@ -34,8 +34,9 @@ enum callee {
 };
 
 enum caller {
-    // callee FUNC_TCP_SEND_ACTIVE_RESET:
     UNKOWN_CALLER,
+
+    // callee FUNC_TCP_SEND_ACTIVE_RESET:
     FUNC_TCP_DISCONNECT,
     FUNC_TCP_ABORT,
     FUNC_TCP_CLOSE,

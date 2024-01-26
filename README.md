@@ -28,7 +28,51 @@ IG_EXPERIMENTAL=true sudo -E ig run ghcr.io/blanquicet/tcprst-gadget
 IG_EXPERIMENTAL=true sudo -E ig run ghcr.io/blanquicet/tcprst-gadget-without-nf
 ```
 
-_**WARNING**: The container and process information might not be correct if the
+## Implementation details
+
+According to our research, there are three ways in the kernel to send a RST:
+
+- `tcp_v{4|6}_send_reset`: It is used when we have to send a RST as a
+  consequence of something wrong in an incoming packet. For instance:
+  - The first packet is not a SYN as TCP always starts with a SYN.
+  - The first packet is received on a closed port.
+  - The host reaches the maximum amount of active TCP connections it is
+    configured to support.
+  - The client sends SYN to an already existing TCP endpoint, which means the
+    same 5-tuple. The server will send a reset to the client.
+- `tcp_send_active_reset`: Unlike `tcp_v{4|6}_send_reset`,
+  `tcp_send_active_reset` is not in reply to incoming packet, but rather an
+  active send. According to the comments in the kernel, this function is called
+  _"when a process closes a file descriptor (either due to an explicit close()
+  or as a byproduct of exit()'ing) and there was unread data in the receive
+  queue."_. In addition, when the connection is idle for too long, this function
+  is used to send a RST to close the connection.
+- `nf_send_reset`: It is used by the `netfilter` packet filtering framework. One
+  of the reason where it has to send a RST packet is when the user configures a
+  rule with target `--reject-with tcp-reset`. For instance, `iptables -A INPUT
+  -p tcp --dport 80 -j REJECT --reject-with tcp-reset`. **NOTE**: This function
+  is available only if the `nf_reject_ipv4` module is loaded. It will be
+  automatically loaded if the user configures a rule with target `REJECT`. Or it
+  can be loaded manually using `modprobe nf_reject_ipv4`.
+
+Some references:
+
+- [1] [Reset tests](https://github.com/torvalds/linux/blob/9d1694dc91ce7b80bc96d6d8eaf1a1eca668d847/tools/testing/selftests/net/tcp_ao/rst.c#L45)
+- [2] [`tcp_send_active_reset()` implementation](https://github.com/torvalds/linux/blob/v5.14/net/ipv4/tcp_output.c#L3426C1-L3431C60)
+
+### Possible improvements
+
+Once the image-based gadgets support user space code for post-processing data,
+we could check if it is possible to only track `tcp_send_active_reset()`,
+`tcp_v4_send_reset()` and `nf_send_reset`. And then, use the `bpf_get_stackid()`
+helper to get the callers. Currently, it can't be done because the eBPF map
+where the stack has to be written (`BPF_MAP_TYPE_STACK_TRACE`) can't be read
+from the an eBPF program using `bpf_map_lookup_elem()`.
+
+## Testing
+
+> [!WARNING]
+> The container and process information might not be correct if the
 server and client are running in the same host (sharing the same kernel). Notice
 it is the information of the process calling the function that sends the RST
 which might be wrong. For instance, it happens when we try to connect to a
@@ -37,9 +81,7 @@ the connection with a RST as it is a closed port. However, when the gadget
 captures the function call generating the reset and we try to retrieve the
 process context using the `bpf_get_current_*()` helpers, they will incorrectly
 return the `wget`'s process information while it should be the kernel one (pid
-`0`, command `swapper/X` and none container name)._
-
-## Testing
+`0`, command `swapper/X` and none container name).
 
 You can use the scripts in [tools/simulate-reset](./tools/simulate-reset/) to
 test the gadget.
@@ -130,52 +172,6 @@ INFO[0000] Experimental features enabled
 
 Check the [gadget.yaml](./gadget/gadget.yaml) file to know what each field
 represents.
-
-## Implementation details
-
-_**WARNING**: The `ig` version used to build this gadget must include the PR
-[#2331](https://github.com/inspektor-gadget/inspektor-gadget/pull/2331). It is
-because this gadget uses `gadget_output_buf()` which is not available in the
-latest release: `v0.24.0`._
-
-According to our research, there are three ways in the kernel to send a RST:
-
-- `tcp_v{4|6}_send_reset`: It is used when we have to send a RST as a
-  consequence of something wrong in an incoming packet. For instance:
-  - The first packet is not a SYNC as TCP always starts with a SYN.
-  - The first packet is received on a closed port.
-  - The host reaches the maximum amount of active TCP connections it is
-    configured to support.
-  - The client sends SYN to an already existing TCP endpoint, which means the
-    same 5-tuple. The server will send a reset to the client.
-- `tcp_send_active_reset`: Unlike `tcp_v{4|6}_send_reset`,
-  `tcp_send_active_reset` is not in reply to incoming packet, but rather an
-  active send. According to the commends in the kernel, this function is called
-  _"when a process closes a file descriptor (either due to an explicit close()
-  or as a byproduct of exit()'ing) and there was unread data in the receive
-  queue."_. In addition, when the connection is idle for too long, this function
-  is used to send a RST to close the connection.
-- `nf_send_reset`: It is used by the `netfilter` packet filtering framework. One
-  of the reason where it has to send a RST packet is when the user configures a
-  rule with target `--reject-with tcp-reset`. For instance, `iptables -A INPUT
-  -p tcp --dport 80 -j REJECT --reject-with tcp-reset`. **NOTE**: This function
-  is available only if the `nf_reject_ipv4` module is loaded. It will be
-  automatically loaded if the user configures a rule with target `REJECT`. Or it
-  can be loaded manually using `modprobe nf_reject_ipv4`.
-
-Some references:
-
-- [1] [Reset tests](https://github.com/torvalds/linux/blob/9d1694dc91ce7b80bc96d6d8eaf1a1eca668d847/tools/testing/selftests/net/tcp_ao/rst.c#L45)
-- [2] [`tcp_send_active_reset()` implementation](https://github.com/torvalds/linux/blob/v5.14/net/ipv4/tcp_output.c#L3426C1-L3431C60)
-
-### Possible improvements
-
-Once the image-based gadgets support user space code for post-processing data,
-we could check if it is possible to only track `tcp_send_active_reset()`,
-`tcp_v4_send_reset()` and `nf_send_reset`. And then, use the `bpf_get_stackid()`
-helper to get the callers. Currently, it can't be done because the eBPF map
-where the stack has to be written (`BPF_MAP_TYPE_STACK_TRACE`) can't be read
-from the an eBPF program using `bpf_map_lookup_elem()`.
 
 ## License
 

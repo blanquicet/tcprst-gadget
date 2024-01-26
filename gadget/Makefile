@@ -2,11 +2,6 @@ CONTAINER_REPO ?= ghcr.io/blanquicet/tcprst-gadget
 CONTAINER_REPO_WITHOUT_NF ?= ghcr.io/blanquicet/tcprst-gadget-without-nf
 IMAGE_TAG ?= latest
 
-# NOTE: ig version must include the following PR
-# https://github.com/inspektor-gadget/inspektor-gadget/pull/2331
-# This is because the tcprst gadget uses gadget_output_buf() which is not
-# available in the latest release: v0.24.0.
-
 .PHONE: build-all
 build-all: build-without-nf build
 
