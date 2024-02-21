@@ -295,8 +295,12 @@ static __always_inline __u32 notify_event(void *ctx,
     event->netns_id = current_proc.netns_id;
     __builtin_memcpy(event->comm, current_proc.comm, sizeof(event->comm));
 
-    // Get process data from both socket enricher (socket owner).
+    // Default if sk is NULL
+    event->src.proto = event->dst.proto = IPPROTO_TCP;
+    event->src.l3.version = event->dst.l3.version = 4;
+
     if (sk) {
+        // Get process data from both socket enricher (socket owner).
         struct proc_ctx socket_proc = {};
         get_socket_proc(&socket_proc, sk);
         event->socket_pid = socket_proc.pid;
@@ -307,27 +311,23 @@ static __always_inline __u32 notify_event(void *ctx,
         event->socket_netns_id = socket_proc.netns_id;
         __builtin_memcpy(event->socket_comm, socket_proc.comm,
                         sizeof(event->socket_comm));
-    }
 
-    // Get IP data from the socket
-    event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
-    // Host expects data in host byte order
-    event->dst.port =
-        bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
-    event->src.proto = event->dst.proto = IPPROTO_TCP;
-    unsigned int family = BPF_CORE_READ(sk, __sk_common.skc_family);
-    if (family == AF_INET) {
-        event->src.l3.version = event->dst.l3.version = 4;
-        event->src.l3.addr.v4 =
-            BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
-        event->dst.l3.addr.v4 =
-            BPF_CORE_READ(sk, __sk_common.skc_daddr);
-    } else {
-        event->src.l3.version = event->dst.l3.version = 6;
-        BPF_CORE_READ_INTO(&event->src.l3.addr.v6, sk,
-                           __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-        BPF_CORE_READ_INTO(&event->dst.l3.addr.v6, sk,
-                           __sk_common.skc_v6_daddr.in6_u.u6_addr32);
+        // Get IP data
+        event->src.port = BPF_CORE_READ(sk, __sk_common.skc_num);
+        // Host expects data in host byte order
+        event->dst.port = bpf_ntohs(BPF_CORE_READ(sk, __sk_common.skc_dport));
+        unsigned int family = BPF_CORE_READ(sk, __sk_common.skc_family);
+        if (family == AF_INET) {
+            event->src.l3.version = event->dst.l3.version = 4;
+            event->src.l3.addr.v4 = BPF_CORE_READ(sk, __sk_common.skc_rcv_saddr);
+            event->dst.l3.addr.v4 = BPF_CORE_READ(sk, __sk_common.skc_daddr);
+        } else {
+            event->src.l3.version = event->dst.l3.version = 6;
+            BPF_CORE_READ_INTO(&event->src.l3.addr.v6, sk,
+                            __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
+            BPF_CORE_READ_INTO(&event->dst.l3.addr.v6, sk,
+                            __sk_common.skc_v6_daddr.in6_u.u6_addr32);
+        }
     }
 
     bpf_printk("DEBUG: %s->%s: reporting event for tid %u",
